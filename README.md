@@ -1,4 +1,4 @@
-> **Experimental only. Testnet-10 only. Not a product, not advice, not Kaspa core, not an audit.**
+> **Experimental only. Testnet-10 only. Not a product, not advice, not Kaspa core, not an audit.** [DISCLAIMER.md](DISCLAIMER.md)
 
 # TN10 vprogs round 8: five L1 covenant designs, tested quiet (set A) and under storm (set B)
 
