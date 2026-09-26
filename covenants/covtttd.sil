@@ -1,0 +1,62 @@
+pragma silverscript ^0.1.0;
+// R8 "mass diet" CovTTT: same rules as round-7 CovTTT v1 (move / claim / draw), but the 9 cells are packed in one byte[9]
+// (0x00 empty, 0x01 X, 0x02 O) instead of 9 x int64 state fields. NOT audited.
+contract CovTTTd(byte[32] initX, byte[32] initO, int initTurn, byte[9] initBoard, int initMaxFee) {
+    byte[32] px = initX;
+    byte[32] po = initO;
+    int turn = initTurn;
+    byte[9] board = initBoard;
+    int maxFee = initMaxFee;
+
+    function wins(byte m) : (bool) {
+        bool w = (board[0] == m && board[1] == m && board[2] == m) || (board[3] == m && board[4] == m && board[5] == m)
+              || (board[6] == m && board[7] == m && board[8] == m) || (board[0] == m && board[3] == m && board[6] == m)
+              || (board[1] == m && board[4] == m && board[7] == m) || (board[2] == m && board[5] == m && board[8] == m)
+              || (board[0] == m && board[4] == m && board[8] == m) || (board[2] == m && board[4] == m && board[6] == m);
+        return (w);
+    }
+
+    entry move(sig s, int cell) {
+        require(cell >= 0 && cell <= 8);
+        require(board[cell] == byte(0x00));
+        (bool wx) = wins(byte(0x01));
+        (bool wo) = wins(byte(0x02));
+        require(!wx && !wo);
+        byte[32] who = turn == 0 ? px : po;
+        require(checkSig(s, pubkey(who)));
+        byte mark = turn == 0 ? byte(0x01) : byte(0x02);
+        byte[] nb = board.split(cell).0 + byte[](mark) + board.split(cell + 1).1;
+        int inV = tx.inputs[this.activeInputIndex].value;
+        require(tx.outputs[0].value >= inV - maxFee);
+        validateOutputState(0, State { px: px, po: po, turn: 1 - turn, board: byte[9](nb), maxFee: maxFee });
+    }
+
+    entry claim(sig s, int m) {
+        require(m == 1 || m == 2);
+        (bool w) = wins(m == 1 ? byte(0x01) : byte(0x02));
+        require(w);
+        byte[32] who = m == 1 ? px : po;
+        require(checkSig(s, pubkey(who)));
+        int inV = tx.inputs[this.activeInputIndex].value;
+        byte[36] dest = new ScriptPubKeyP2PK(pubkey(who));
+        require(tx.outputs[0].scriptPubKey == byte[](dest));
+        require(tx.outputs[0].value >= inV - maxFee);
+    }
+
+    entry draw(sig s) {
+        require(board[0] != byte(0x00) && board[1] != byte(0x00) && board[2] != byte(0x00) && board[3] != byte(0x00) && board[4] != byte(0x00)
+             && board[5] != byte(0x00) && board[6] != byte(0x00) && board[7] != byte(0x00) && board[8] != byte(0x00));
+        (bool wx) = wins(byte(0x01));
+        (bool wo) = wins(byte(0x02));
+        require(!wx && !wo);
+        require(checkSig(s, pubkey(px)));
+        int inV = tx.inputs[this.activeInputIndex].value;
+        int half = (inV - maxFee) / 2;
+        byte[36] dx = new ScriptPubKeyP2PK(pubkey(px));
+        byte[36] dO = new ScriptPubKeyP2PK(pubkey(po));
+        require(tx.outputs[0].scriptPubKey == byte[](dx));
+        require(tx.outputs[1].scriptPubKey == byte[](dO));
+        require(tx.outputs[0].value >= half);
+        require(tx.outputs[1].value >= half);
+    }
+}

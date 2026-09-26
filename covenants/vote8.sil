@@ -1,0 +1,60 @@
+pragma silverscript ^0.1.0;
+// R8 voting counter, Merkle allow-list depth 8 (generated). Leaf = blake2b(voter x-only pubkey). Node = blake2b(left+right).
+// Each spend adds exactly one vote. NOT prevented: the same key voting twice (no nullifier set in v1). NOT audited.
+contract Vote8(byte[32] initOwner, byte[32] initRoot, int initTally, int initMaxFee) {
+    byte[32] owner = initOwner;
+    byte[32] root = initRoot;
+    int tally = initTally;
+    int maxFee = initMaxFee;
+    entry vote(sig s, byte[32] pk, byte[] proof, int idx) {
+        require(proof.length == 256);
+        require(idx >= 0 && idx < 256);
+        require(checkSig(s, pubkey(pk)));
+        byte[32] h0 = blake2b(byte[](pk));
+        byte[] p0 = proof;
+        int n0 = idx;
+        byte[] sib0 = p0.split(32).0;
+        byte[] p1 = p0.split(32).1;
+        byte[32] h1 = n0 % 2 == 0 ? blake2b(byte[](h0) + sib0) : blake2b(sib0 + byte[](h0));
+        int n1 = n0 / 2;
+        byte[] sib1 = p1.split(32).0;
+        byte[] p2 = p1.split(32).1;
+        byte[32] h2 = n1 % 2 == 0 ? blake2b(byte[](h1) + sib1) : blake2b(sib1 + byte[](h1));
+        int n2 = n1 / 2;
+        byte[] sib2 = p2.split(32).0;
+        byte[] p3 = p2.split(32).1;
+        byte[32] h3 = n2 % 2 == 0 ? blake2b(byte[](h2) + sib2) : blake2b(sib2 + byte[](h2));
+        int n3 = n2 / 2;
+        byte[] sib3 = p3.split(32).0;
+        byte[] p4 = p3.split(32).1;
+        byte[32] h4 = n3 % 2 == 0 ? blake2b(byte[](h3) + sib3) : blake2b(sib3 + byte[](h3));
+        int n4 = n3 / 2;
+        byte[] sib4 = p4.split(32).0;
+        byte[] p5 = p4.split(32).1;
+        byte[32] h5 = n4 % 2 == 0 ? blake2b(byte[](h4) + sib4) : blake2b(sib4 + byte[](h4));
+        int n5 = n4 / 2;
+        byte[] sib5 = p5.split(32).0;
+        byte[] p6 = p5.split(32).1;
+        byte[32] h6 = n5 % 2 == 0 ? blake2b(byte[](h5) + sib5) : blake2b(sib5 + byte[](h5));
+        int n6 = n5 / 2;
+        byte[] sib6 = p6.split(32).0;
+        byte[] p7 = p6.split(32).1;
+        byte[32] h7 = n6 % 2 == 0 ? blake2b(byte[](h6) + sib6) : blake2b(sib6 + byte[](h6));
+        int n7 = n6 / 2;
+        byte[] sib7 = p7.split(32).0;
+        byte[32] h8 = n7 % 2 == 0 ? blake2b(byte[](h7) + sib7) : blake2b(sib7 + byte[](h7));
+        int n8 = n7 / 2;
+        require(h8 == root);
+        int inV = tx.inputs[this.activeInputIndex].value;
+        require(tx.outputs[0].value >= inV - maxFee);
+        validateOutputState(0, State { owner: owner, root: root, tally: tally + 1, maxFee: maxFee });
+    }
+    entry close(sig s) {
+        // the ballot box owner ends the vote and takes the pot (pot recovery path for tests)
+        require(checkSig(s, pubkey(owner)));
+        int inV = tx.inputs[this.activeInputIndex].value;
+        byte[36] dest = new ScriptPubKeyP2PK(pubkey(owner));
+        require(tx.outputs[0].scriptPubKey == byte[](dest));
+        require(tx.outputs[0].value >= inV - maxFee);
+    }
+}

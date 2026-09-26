@@ -1,0 +1,61 @@
+pragma silverscript ^0.1.0;
+// R8 two-bidder sealed-bid auction (TN10 prototype, NOT audited). The pot holds both bidders' deposits (2 * dep).
+// Commit: ha = blake2b(bid8 + salt32), hb likewise, fixed at creation. phase 0: A reveals (bid <= dep) -> phase 1, bidA stored.
+// phase 1: B reveals -> settle: seller gets the higher bid, winner gets dep - bid back, loser gets dep back (ties -> A).
+// Timeouts: phase 0 (A silent): A's deposit to seller, B refunded. phase 1 (B silent): B's deposit to seller, A refunded.
+contract Auction(byte[32] initS, byte[32] initA, byte[32] initB, byte[32] initHa, byte[32] initHb, int initBidA, int initPhase, int initDep, int initMaxFee, int initTtl) {
+    byte[32] seller = initS;
+    byte[32] ba = initA;
+    byte[32] bb = initB;
+    byte[32] ha = initHa;
+    byte[32] hb = initHb;
+    int bidA = initBidA;
+    int phase = initPhase;
+    int dep = initDep;
+    int maxFee = initMaxFee;
+    int ttl = initTtl;
+
+    entry revealA(sig s, byte[8] bid8, byte[32] salt) {
+        require(phase == 0);
+        require(blake2b(byte[](bid8) + byte[](salt)) == ha);
+        require(checkSig(s, pubkey(ba)));
+        int bid = int(bid8);
+        require(bid > 0 && bid <= dep);
+        int inV = tx.inputs[this.activeInputIndex].value;
+        require(tx.outputs[0].value >= inV - maxFee);
+        validateOutputState(0, State { seller: seller, ba: ba, bb: bb, ha: ha, hb: hb, bidA: bid, phase: 1, dep: dep, maxFee: maxFee, ttl: ttl });
+    }
+
+    entry revealB(sig s, byte[8] bid8, byte[32] salt) {
+        require(phase == 1);
+        require(blake2b(byte[](bid8) + byte[](salt)) == hb);
+        require(checkSig(s, pubkey(bb)));
+        int bidB = int(bid8);
+        require(bidB > 0 && bidB <= dep);
+        bool aWins = bidA >= bidB;
+        int high = aWins ? bidA : bidB;
+        byte[32] w = aWins ? ba : bb;
+        byte[32] l = aWins ? bb : ba;
+        byte[36] ds = new ScriptPubKeyP2PK(pubkey(seller));
+        byte[36] dw = new ScriptPubKeyP2PK(pubkey(w));
+        byte[36] dl = new ScriptPubKeyP2PK(pubkey(l));
+        require(tx.outputs[0].scriptPubKey == byte[](ds));
+        require(tx.outputs[0].value >= high);
+        require(tx.outputs[1].scriptPubKey == byte[](dw));
+        require(tx.outputs[1].value >= dep - high - maxFee);
+        require(tx.outputs[2].scriptPubKey == byte[](dl));
+        require(tx.outputs[2].value >= dep - maxFee);
+    }
+
+    entry timeout(sig s) {
+        require(this.ageDaa >= ttl);
+        byte[32] honest = phase == 0 ? bb : ba;
+        require(checkSig(s, pubkey(honest)));
+        byte[36] ds = new ScriptPubKeyP2PK(pubkey(seller));
+        byte[36] dh = new ScriptPubKeyP2PK(pubkey(honest));
+        require(tx.outputs[0].scriptPubKey == byte[](ds));
+        require(tx.outputs[0].value >= dep - maxFee);
+        require(tx.outputs[1].scriptPubKey == byte[](dh));
+        require(tx.outputs[1].value >= dep - maxFee);
+    }
+}

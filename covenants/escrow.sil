@@ -1,0 +1,41 @@
+pragma silverscript ^0.1.0;
+// R8 Escrow 2-of-3 with timeout refund (TN10 prototype, NOT audited).
+// release: seller + (buyer or arbiter) -> seller.  refund: buyer + (seller or arbiter) -> buyer.  timeout: buyer alone after ttl -> buyer.
+contract Escrow(byte[32] initB, byte[32] initS, byte[32] initA, int initMaxFee, int initTtl) {
+    byte[32] buyer = initB;
+    byte[32] seller = initS;
+    byte[32] arbiter = initA;
+    int maxFee = initMaxFee;
+    int ttl = initTtl;
+
+    entry release(sig s1, sig s2, int who) {
+        require(who == 0 || who == 1);
+        byte[32] k1 = who == 0 ? buyer : arbiter;
+        require(checkSig(s1, pubkey(k1)));
+        require(checkSig(s2, pubkey(seller)));
+        int inV = tx.inputs[this.activeInputIndex].value;
+        byte[36] dest = new ScriptPubKeyP2PK(pubkey(seller));
+        require(tx.outputs[0].scriptPubKey == byte[](dest));
+        require(tx.outputs[0].value >= inV - maxFee);
+    }
+
+    entry refund(sig s1, sig s2, int who) {
+        require(who == 0 || who == 1);
+        byte[32] k1 = who == 0 ? seller : arbiter;
+        require(checkSig(s1, pubkey(k1)));
+        require(checkSig(s2, pubkey(buyer)));
+        int inV = tx.inputs[this.activeInputIndex].value;
+        byte[36] dest = new ScriptPubKeyP2PK(pubkey(buyer));
+        require(tx.outputs[0].scriptPubKey == byte[](dest));
+        require(tx.outputs[0].value >= inV - maxFee);
+    }
+
+    entry timeout(sig s) {
+        require(this.ageDaa >= ttl);
+        require(checkSig(s, pubkey(buyer)));
+        int inV = tx.inputs[this.activeInputIndex].value;
+        byte[36] dest = new ScriptPubKeyP2PK(pubkey(buyer));
+        require(tx.outputs[0].scriptPubKey == byte[](dest));
+        require(tx.outputs[0].value >= inV - maxFee);
+    }
+}

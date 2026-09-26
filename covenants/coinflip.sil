@@ -1,0 +1,46 @@
+pragma silverscript ^0.1.0;
+// R8 commit-reveal coin flip (TN10 prototype, NOT audited). Both commitments are fixed at creation.
+// phase 0: A reveals secret (blake2b == ha) -> phase 1 with ra stored. phase 1: B reveals (blake2b == hb) ->
+// winner = low bit of (ra[0] xor sb[0]): 1 -> A, 0 -> B; pot goes to winner. Timeouts: non-revealer loses.
+contract CoinFlip(byte[32] initA, byte[32] initB, byte[32] initHa, byte[32] initHb, byte[32] initRa, int initPhase, int initMaxFee, int initTtl) {
+    byte[32] pa = initA;
+    byte[32] pb = initB;
+    byte[32] ha = initHa;
+    byte[32] hb = initHb;
+    byte[32] ra = initRa;
+    int phase = initPhase;
+    int maxFee = initMaxFee;
+    int ttl = initTtl;
+
+    entry revealA(sig s, byte[32] secret) {
+        require(phase == 0);
+        require(blake2b(byte[](secret)) == ha);
+        require(checkSig(s, pubkey(pa)));
+        int inV = tx.inputs[this.activeInputIndex].value;
+        require(tx.outputs[0].value >= inV - maxFee);
+        validateOutputState(0, State { pa: pa, pb: pb, ha: ha, hb: hb, ra: secret, phase: 1, maxFee: maxFee, ttl: ttl });
+    }
+
+    entry revealB(sig s, byte[32] secret) {
+        require(phase == 1);
+        require(blake2b(byte[](secret)) == hb);
+        require(checkSig(s, pubkey(pb)));
+        byte[1] x = byte[1](ra.split(1).0) ^ byte[1](secret.split(1).0);
+        byte[1] bit = x & byte[_](0x01);
+        byte[32] winner = bit == byte[_](0x01) ? pa : pb;
+        int inV = tx.inputs[this.activeInputIndex].value;
+        byte[36] dest = new ScriptPubKeyP2PK(pubkey(winner));
+        require(tx.outputs[0].scriptPubKey == byte[](dest));
+        require(tx.outputs[0].value >= inV - maxFee);
+    }
+
+    entry timeout(sig s) {
+        require(this.ageDaa >= ttl);
+        byte[32] waiter = phase == 0 ? pb : pa;
+        require(checkSig(s, pubkey(waiter)));
+        int inV = tx.inputs[this.activeInputIndex].value;
+        byte[36] dest = new ScriptPubKeyP2PK(pubkey(waiter));
+        require(tx.outputs[0].scriptPubKey == byte[](dest));
+        require(tx.outputs[0].value >= inV - maxFee);
+    }
+}
